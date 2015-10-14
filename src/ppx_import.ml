@@ -89,7 +89,7 @@ let rec longident_of_path path =
 
 let rec core_type_of_type_expr ~subst type_expr =
   match type_expr.desc with
-  | Tvar None -> Typ.any ()
+  | Tvar None | Tvar (Some "_") -> Typ.any ()
   | Tvar (Some var) -> Typ.var var
   | Tarrow (label, lhs, rhs, _) ->
     Typ.arrow label (core_type_of_type_expr ~subst lhs)
