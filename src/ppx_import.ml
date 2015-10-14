@@ -28,7 +28,7 @@ let locate_sig ~loc lid =
     !Config.load_path |>
     List.map (fun dir ->
       [Filename.concat dir (cu ^ ".cmi");
-       Filename.concat dir ((String.uncapitalize cu) ^ ".cmi")]) |>
+       Filename.concat dir ((String.uncapitalize_ascii cu) ^ ".cmi")]) |>
     List.flatten
   in
   let cmi =
@@ -139,7 +139,23 @@ let ptype_decl_of_ttype_decl ?manifest ~subst ptype_name ttype_decl =
     | Type_variant constrs ->
       Ptype_variant (constrs |> List.map (fun cd ->
         { pcd_name       = { txt = cd.cd_id.name; loc = cd.cd_loc };
-          pcd_args       = List.map (core_type_of_type_expr ~subst) cd.cd_args;
+          pcd_args       =
+            (match cd.cd_args with
+             | Cstr_tuple typs -> Pcstr_tuple (List.map (core_type_of_type_expr ~subst) typs)
+             | Cstr_record lds ->
+               Pcstr_record
+                 (List.map
+                    (fun { ld_id = { name = txt };
+                           ld_mutable = pld_mutable;
+                           ld_type;
+                           ld_loc = pld_loc;
+                           ld_attributes = pld_attributes } ->
+                      { pld_name = { txt; loc = pld_loc };
+                        pld_mutable;
+                        pld_type = core_type_of_type_expr ~subst ld_type;
+                        pld_loc;
+                        pld_attributes })
+                    lds));
           pcd_res        = (match cd.cd_res with Some x -> Some (core_type_of_type_expr ~subst x)
                                                | None -> None);
           pcd_loc        = cd.cd_loc;
@@ -203,19 +219,27 @@ let rec psig_of_tsig ~subst ?(trec=[]) tsig =
     let ptype_decl = ptype_decl_of_ttype_decl ~subst (Location.mknoloc name) ttype_decl in
     begin match rec_flag with
     | Trec_not ->
-      { psig_desc = Psig_type [ptype_decl]; psig_loc = Location.none } ::
+      { psig_desc = Psig_type (Nonrecursive, [ptype_decl]); psig_loc = Location.none } ::
       psig_of_tsig ~subst rest
     | Trec_first | Trec_next ->
       psig_of_tsig ~subst ~trec:(ptype_decl :: trec) rest
     end
   | _ when trec <> [] ->
-    { psig_desc = Psig_type trec; psig_loc = Location.none } ::
+    { psig_desc = Psig_type (Recursive, trec); psig_loc = Location.none } ::
     psig_of_tsig ~subst tsig
   | Sig_value ({ name }, { val_type; val_kind; val_loc; val_attributes }) :: rest ->
     let pval_prim =
       match val_kind with
       | Val_reg -> []
-      | Val_prim p -> Primitive.description_list p
+      | Val_prim p ->
+        (Primitive.print
+           p
+           { Outcometree.
+             oval_name = "";
+             oval_type = Outcometree.Otyp_abstract;
+             oval_prims = [];
+             oval_attributes = [] })
+        .Outcometree.oval_prims
       | _ -> assert false
     in
     { psig_desc = Psig_value {
