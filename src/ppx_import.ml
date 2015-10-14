@@ -119,12 +119,15 @@ let rec core_type_of_type_expr ~subst type_expr =
   | _ ->
     assert false
 
-let ptype_decl_of_ttype_decl ?manifest ~subst ptype_name ttype_decl =
+let ptype_decl_of_ttype_decl ?params ?manifest ~subst ptype_name ttype_decl =
   let ptype_params =
-    List.map2 (fun param variance ->
-        core_type_of_type_expr ~subst param,
-        Invariant (* TODO *))
-      ttype_decl.type_params ttype_decl.type_variance
+    match params with
+    | Some params -> params
+    | None ->
+      List.map2 (fun param variance ->
+          core_type_of_type_expr ~subst param,
+          Invariant (* TODO *))
+        ttype_decl.type_params ttype_decl.type_variance
   and ptype_kind =
     match ttype_decl.type_kind with
     | Type_abstract -> Ptype_abstract
@@ -194,10 +197,10 @@ let subst_of_manifest { ptyp_attributes; ptyp_loc } =
 
 let type_declaration mapper type_decl =
   match type_decl with
-  | { ptype_attributes; ptype_name; ptype_manifest = Some {
+  | { ptype_attributes; ptype_name; ptype_params = params; ptype_manifest = Some {
         ptyp_desc = Ptyp_extension ({ txt = "import"; loc }, payload) } } ->
     begin match payload with
-    | PTyp ({ ptyp_desc = Ptyp_constr ({ txt = lid; loc }, []) } as manifest) ->
+    | PTyp ({ ptyp_desc = Ptyp_constr ({ txt = lid; loc }, _) } as manifest) ->
       if Ast_mapper.tool_name () = "ocamldep" then
         (* Just put it as manifest *)
         { type_decl with ptype_manifest = Some manifest }
@@ -207,7 +210,7 @@ let type_declaration mapper type_decl =
           let subst = subst @ [Lident (Longident.last lid),
                                Typ.constr { txt = Lident ptype_name.txt; loc = ptype_name.loc } []] in
           let ttype_decl = locate_ttype_decl ~loc (locate_sig ~loc lid) lid in
-          let ptype_decl = ptype_decl_of_ttype_decl ~manifest ~subst ptype_name ttype_decl in
+          let ptype_decl = ptype_decl_of_ttype_decl ~params ~manifest ~subst ptype_name ttype_decl in
           { ptype_decl with ptype_attributes })
     | _ -> raise_errorf ~loc "Invalid [%%import] syntax"
     end
