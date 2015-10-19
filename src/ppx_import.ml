@@ -88,6 +88,17 @@ let rec longident_of_path path =
   | Path.Papply (lhs, rhs) -> Lapply (longident_of_path lhs, longident_of_path rhs)
 
 let rec core_type_of_type_expr ~subst type_expr =
+  let named ~mk path args =
+    let lid  = longident_of_path path in
+    let args = (List.map (core_type_of_type_expr ~subst) args) in
+    begin match List.assoc lid subst with
+    | { ptyp_desc = Ptyp_constr (lid, _) } as typ ->
+      { typ with ptyp_desc = Ptyp_constr (lid, args) }
+    | _ -> assert false
+    | exception Not_found ->
+      mk { txt = lid; loc = !default_loc } args
+    end
+  in
   match type_expr.desc with
   | Tvar None | Tvar (Some "_") -> Typ.any ()
   | Tvar (Some var) -> Typ.var var
@@ -96,16 +107,7 @@ let rec core_type_of_type_expr ~subst type_expr =
                     (core_type_of_type_expr ~subst rhs)
   | Ttuple xs ->
     Typ.tuple (List.map (core_type_of_type_expr ~subst) xs)
-  | Tconstr (path, args, _) ->
-    let lid  = longident_of_path path in
-    let args = (List.map (core_type_of_type_expr ~subst) args) in
-    begin match List.assoc lid subst with
-    | { ptyp_desc = Ptyp_constr (lid, _) } as typ ->
-      { typ with ptyp_desc = Ptyp_constr (lid, args) }
-    | _ -> assert false
-    | exception Not_found ->
-      Typ.constr { txt = longident_of_path path; loc = !default_loc } args
-    end
+  | Tconstr (path, args, _) -> named ~mk:Typ.constr path args
   | Tvariant { row_fields; row_closed } ->
     let fields =
       row_fields |> List.map (fun (label, row_field) ->
@@ -116,6 +118,7 @@ let rec core_type_of_type_expr ~subst type_expr =
         | _ -> assert false)
     in
     Typ.variant fields Closed None
+  | Tobject (_, { contents = Some (path, args) }) -> named ~mk:Typ.class_ path @@ List.tl args
   | _ ->
     assert false
 
