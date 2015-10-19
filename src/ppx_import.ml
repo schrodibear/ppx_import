@@ -87,51 +87,62 @@ let rec longident_of_path path =
   | Path.Pdot (path, name, _) -> Ldot (longident_of_path path, name)
   | Path.Papply (lhs, rhs) -> Lapply (longident_of_path lhs, longident_of_path rhs)
 
-let rec core_type_of_type_expr ~subst type_expr =
-  let named ~mk path args =
-    let lid  = longident_of_path path in
-    let args = (List.map (core_type_of_type_expr ~subst) args) in
-    begin match List.assoc lid subst with
-    | { ptyp_desc = Ptyp_constr (lid, _) } as typ ->
-      { typ with ptyp_desc = Ptyp_constr (lid, args) }
-    | _ -> assert false
-    | exception Not_found ->
-      mk { txt = lid; loc = !default_loc } args
-    end
-  in
-  match type_expr.desc with
-  | Tvar None | Tvar (Some "_") -> Typ.any ()
-  | Tvar (Some var) -> Typ.var var
-  | Tarrow (label, lhs, rhs, _) ->
-    Typ.arrow label (core_type_of_type_expr ~subst lhs)
-                    (core_type_of_type_expr ~subst rhs)
-  | Ttuple xs ->
-    Typ.tuple (List.map (core_type_of_type_expr ~subst) xs)
-  | Tconstr (path, args, _) -> named ~mk:Typ.constr path args
-  | Tvariant { row_fields; row_closed } ->
-    let fields =
-      row_fields |> List.map (fun (label, row_field) ->
-        match row_field with
-        | Rpresent None -> Rtag (label, [], true, [])
-        | Rpresent (Some ttyp) ->
-          Rtag (label, [], false, [core_type_of_type_expr ~subst ttyp])
-        | _ -> assert false)
+let rec core_type_of_type_expr ~subst ?(varsubst=[]) =
+  let core_type_of_type_expr t = core_type_of_type_expr ~subst ~varsubst t in
+  fun type_expr ->
+    let named ~mk path args =
+      let lid  = longident_of_path path in
+      let args = (List.map core_type_of_type_expr args) in
+      begin match List.assoc lid subst with
+      | { ptyp_desc = Ptyp_constr (lid, _) } as typ ->
+        { typ with ptyp_desc = Ptyp_constr (lid, args) }
+      | _ -> assert false
+      | exception Not_found ->
+        mk { txt = lid; loc = !default_loc } args
+      end
     in
-    Typ.variant fields Closed None
-  | Tobject (_, { contents = Some (path, args) }) -> named ~mk:Typ.class_ path @@ List.tl args
-  | _ ->
-    assert false
+    match type_expr.desc with
+    | Tvar None | Tvar (Some "_") -> Typ.any ()
+    | Tvar (Some var) -> (try Typ.var (List.assoc var varsubst) with Not_found -> Typ.var var)
+    | Tarrow (label, lhs, rhs, _) ->
+      Typ.arrow label (core_type_of_type_expr lhs) (core_type_of_type_expr rhs)
+    | Ttuple xs ->
+      Typ.tuple (List.map core_type_of_type_expr xs)
+    | Tconstr (path, args, _) -> named ~mk:Typ.constr path args
+    | Tvariant { row_fields; row_closed } ->
+      let fields =
+        row_fields |> List.map (fun (label, row_field) ->
+          match row_field with
+          | Rpresent None -> Rtag (label, [], true, [])
+          | Rpresent (Some ttyp) ->
+            Rtag (label, [], false, [core_type_of_type_expr ttyp])
+          | _ -> assert false)
+      in
+      Typ.variant fields Closed None
+    | Tobject (_, { contents = Some (path, args) }) -> named ~mk:Typ.class_ path @@ List.tl args
+    | _ ->
+      assert false
 
 let ptype_decl_of_ttype_decl ?params ?manifest ~subst ptype_name ttype_decl =
-  let ptype_params =
+  let ptype_params, varsubst =
     match params with
-    | Some params -> params
+    | Some params ->
+      params,
+      List.fold_left2
+        (fun acc orig (subst, _) ->
+           match orig.desc, subst.ptyp_desc with
+           | Tvar (Some v), Ptyp_var v' -> (v, v') :: acc
+           | _ -> acc)
+        []
+        ttype_decl.type_params params
     | None ->
       List.map2 (fun param variance ->
           core_type_of_type_expr ~subst param,
           Invariant (* TODO *))
-        ttype_decl.type_params ttype_decl.type_variance
-  and ptype_kind =
+        ttype_decl.type_params ttype_decl.type_variance,
+      []
+  in
+  let ptype_kind =
     match ttype_decl.type_kind with
     | Type_abstract -> Ptype_abstract
     | Type_open -> Ptype_open
@@ -162,7 +173,7 @@ let ptype_decl_of_ttype_decl ?params ?manifest ~subst ptype_name ttype_decl =
                         pld_loc;
                         pld_attributes })
                     lds));
-          pcd_res        = (match cd.cd_res with Some x -> Some (core_type_of_type_expr ~subst x)
+          pcd_res        = (match cd.cd_res with Some x -> Some (core_type_of_type_expr ~subst ~varsubst x)
                                                | None -> None);
           pcd_loc        = cd.cd_loc;
           pcd_attributes = cd.cd_attributes; }))
