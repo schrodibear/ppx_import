@@ -142,6 +142,7 @@ let ptype_decl_of_ttype_decl ?params ?manifest ~subst ptype_name ttype_decl =
         ttype_decl.type_params ttype_decl.type_variance,
       []
   in
+  let core_type_of_type_expr = core_type_of_type_expr ~subst ~varsubst in
   let ptype_kind =
     match ttype_decl.type_kind with
     | Type_abstract -> Ptype_abstract
@@ -150,7 +151,7 @@ let ptype_decl_of_ttype_decl ?params ?manifest ~subst ptype_name ttype_decl =
       Ptype_record (labels |> List.map (fun ld ->
         { pld_name       = { txt = ld.ld_id.name; loc = ld.ld_loc };
           pld_mutable    = ld.ld_mutable;
-          pld_type       = core_type_of_type_expr ~subst ld.ld_type;
+          pld_type       = core_type_of_type_expr ld.ld_type;
           pld_loc        = ld.ld_loc;
           pld_attributes = ld.ld_attributes; }))
     | Type_variant constrs ->
@@ -158,7 +159,7 @@ let ptype_decl_of_ttype_decl ?params ?manifest ~subst ptype_name ttype_decl =
         { pcd_name       = { txt = cd.cd_id.name; loc = cd.cd_loc };
           pcd_args       =
             (match cd.cd_args with
-             | Cstr_tuple typs -> Pcstr_tuple (List.map (core_type_of_type_expr ~subst) typs)
+             | Cstr_tuple typs -> Pcstr_tuple (List.map core_type_of_type_expr typs)
              | Cstr_record lds ->
                Pcstr_record
                  (List.map
@@ -169,17 +170,17 @@ let ptype_decl_of_ttype_decl ?params ?manifest ~subst ptype_name ttype_decl =
                            ld_attributes = pld_attributes } ->
                       { pld_name = { txt; loc = pld_loc };
                         pld_mutable;
-                        pld_type = core_type_of_type_expr ~subst ld_type;
+                        pld_type = core_type_of_type_expr ld_type;
                         pld_loc;
                         pld_attributes })
                     lds));
-          pcd_res        = (match cd.cd_res with Some x -> Some (core_type_of_type_expr ~subst ~varsubst x)
+          pcd_res        = (match cd.cd_res with Some x -> Some (core_type_of_type_expr x)
                                                | None -> None);
           pcd_loc        = cd.cd_loc;
           pcd_attributes = cd.cd_attributes; }))
   and ptype_manifest =
     match ttype_decl.type_manifest with
-    | Some typ -> Some (core_type_of_type_expr ~subst typ)
+    | Some typ -> Some (core_type_of_type_expr typ)
     | None -> manifest
   in
   { ptype_name; ptype_params; ptype_kind; ptype_manifest;
