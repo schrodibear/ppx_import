@@ -110,15 +110,23 @@ let rec core_type_of_type_expr ~subst ?(varsubst=[]) =
       Typ.tuple (List.map core_type_of_type_expr xs)
     | Tconstr (path, args, _) -> named ~mk:Typ.constr path args
     | Tvariant { row_fields; row_closed } ->
+      let poly = ref None in
       let fields =
         row_fields |> List.map (fun (label, row_field) ->
-          match row_field with
-          | Rpresent None -> Rtag (label, [], true, [])
-          | Rpresent (Some ttyp) ->
-            Rtag (label, [], false, [core_type_of_type_expr ttyp])
-          | _ -> assert false)
+            let rec mapper =
+              function
+              | Rpresent None -> Rtag (label, [], true, [])
+              | Rpresent (Some ttyp) ->
+                Rtag (label, [], false, [core_type_of_type_expr ttyp])
+              | Reither (_, _, _, { contents = Some rf }) -> mapper rf
+              | Reither (flag, ttys, _, _) ->
+                poly := Some [];
+                Rtag (label, [], flag, List.map core_type_of_type_expr ttys)
+              | _ -> assert false
+            in
+            mapper row_field)
       in
-      Typ.variant fields Closed None
+      Typ.variant fields (if row_closed then Closed else Open) !poly
     | Tobject (_, { contents = Some (path, args) }) -> named ~mk:Typ.class_ path @@ List.tl args
     | _ ->
       assert false
