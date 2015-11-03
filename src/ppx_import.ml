@@ -95,7 +95,7 @@ let rec core_type_of_type_expr ~subst ?(varsubst=[]) =
       let args = (List.map core_type_of_type_expr args) in
       begin match List.assoc lid subst with
       | { ptyp_desc = Ptyp_constr (lid, _) } as typ ->
-        { typ with ptyp_desc = Ptyp_constr (lid, args) }
+        { typ with ptyp_desc = (mk lid args).ptyp_desc }
       | _ -> assert false
       | exception Not_found ->
         mk { txt = lid; loc = !default_loc } args
