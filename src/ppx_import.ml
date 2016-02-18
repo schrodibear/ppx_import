@@ -134,7 +134,7 @@ let rec core_type_of_type_expr ~subst ?(varsubst=[]) =
 let ptype_decl_of_ttype_decl ?params ?manifest ~subst ptype_name ttype_decl =
   let ptype_params, varsubst =
     match params with
-    | Some params ->
+    | Some params when List.(length params = length ttype_decl.type_params) ->
       params,
       List.fold_left2
         (fun acc orig (subst, _) ->
@@ -143,6 +143,10 @@ let ptype_decl_of_ttype_decl ?params ?manifest ~subst ptype_name ttype_decl =
            | _ -> acc)
         []
         ttype_decl.type_params params
+    | Some params ->
+      raise_errorf ~loc:ptype_name.loc
+        "A type with %d parameter(s) can't be imported as type `%s' with %d parameter(s)"
+        (List.length ttype_decl.type_params) ptype_name.txt (List.length params)
     | None ->
       List.map2 (fun param variance ->
           core_type_of_type_expr ~subst param,
