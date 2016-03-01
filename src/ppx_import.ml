@@ -164,17 +164,28 @@ let rec core_type_of_type_expr ~subst ?(varsubst=[]) =
 
 
 let ptype_decl_of_ttype_decl ?params ?manifest ~subst ptype_name ttype_decl =
-  let ptype_params, varsubst =
+  let ptype_params, (varsubst, cstrs) =
     match params with
     | Some params when List.(length params = length ttype_decl.type_params) ->
       params,
+      let varsubst =
+        List.fold_left2
+          (fun acc orig (subst, _) ->
+             match orig.desc, subst.ptyp_desc with
+             | Tvar (Some v), Ptyp_var v' -> (v, v') :: acc
+             | _ -> acc)
+          []
+          ttype_decl.type_params params
+      in
+      varsubst,
       List.fold_left2
-        (fun acc orig (subst, _) ->
-           match orig.desc, subst.ptyp_desc with
-           | Tvar (Some v), Ptyp_var v' -> (v, v') :: acc
-           | _ -> acc)
-        []
-        ttype_decl.type_params params
+          (fun acc orig (subst', _) ->
+            match orig.desc, subst'.ptyp_desc with
+            | Tvar _, _           -> acc
+            | _,      Ptyp_var v' -> (v', core_type_of_type_expr ~subst ~varsubst orig, subst'.ptyp_loc) :: acc
+            | _ -> acc)
+          []
+          ttype_decl.type_params params
     | Some params ->
       raise_errorf ~loc:ptype_name.loc
         "A type with %d parameter(s) can't be imported as type `%s' with %d parameter(s)"
@@ -184,7 +195,7 @@ let ptype_decl_of_ttype_decl ?params ?manifest ~subst ptype_name ttype_decl =
           core_type_of_type_expr ~subst param,
           Invariant (* TODO *))
         ttype_decl.type_params ttype_decl.type_variance,
-      []
+      ([], [])
   in
   let core_type_of_type_expr = core_type_of_type_expr ~subst ~varsubst in
   let ptype_kind =
@@ -228,7 +239,7 @@ let ptype_decl_of_ttype_decl ?params ?manifest ~subst ptype_name ttype_decl =
     | None -> manifest
   in
   { ptype_name; ptype_params; ptype_kind; ptype_manifest;
-    ptype_cstrs      = [];
+    ptype_cstrs      = List.map (fun (v, ct, loc) -> Typ.var v, ct, loc) cstrs;
     ptype_private    = Public;
     ptype_attributes = ttype_decl.type_attributes;
     ptype_loc        = ttype_decl.type_loc; }
