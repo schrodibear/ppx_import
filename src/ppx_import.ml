@@ -128,8 +128,40 @@ let rec core_type_of_type_expr ~subst ?(varsubst=[]) =
       in
       Typ.variant fields (if row_closed then Closed else Open) !poly
     | Tobject (_, { contents = Some (path, args) }) -> named ~mk:Typ.class_ path @@ List.tl args
-    | _ ->
-      assert false
+    | Tobject (fds, { contents = None }) ->
+      let rec fields t =
+        match t.desc with
+        | Tfield (s, Fpresent, t, ts)     ->
+          let varopt, ts = fields ts in
+                                             varopt, (s, [], core_type_of_type_expr t) :: ts
+        | Tnil                            -> None, []
+        | Tvar None
+        | Tvar (Some "_")                 -> Some None, []
+        | Tvar (Some v)                   -> Some (Some (try List.assoc v varsubst with Not_found -> v)), []
+        | _                               -> assert false
+      in
+      begin match fields fds with
+      | None,          fields      -> Typ.object_ fields Closed
+      | Some None,     fields      -> Typ.object_ fields Open
+      | Some (Some v), fields      -> Typ.alias (Typ.object_ fields Open) v
+      end
+    | Tpoly (ty, tys) ->
+      let tys =
+        List.map
+          (fun ty ->
+             ty |>
+             core_type_of_type_expr |>
+             function
+             | { ptyp_desc = Ptyp_var s; _ } -> s
+             | _ ->
+               raise_errorf "Unsupported type description: constrained explicit polymorphism, e.g. 'a. ([> ] as 'a)")
+          tys
+      in
+      Typ.poly tys (core_type_of_type_expr ty)
+    | Tpackage _ -> raise_errorf "Unsupported type description: package, e.g. (module S)"
+    | Tnil | Tfield _ | Tlink _ | Tsubst _ | Tunivar _ -> assert false
+
+
 
 let ptype_decl_of_ttype_decl ?params ?manifest ~subst ptype_name ttype_decl =
   let ptype_params, varsubst =
