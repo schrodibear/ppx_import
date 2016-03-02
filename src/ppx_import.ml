@@ -97,12 +97,19 @@ let fresh_var, refresh_var_scope =
   (fun () -> counter := -1)
 
 let rec core_type_of_type_expr =
-  let rec has_row te =
+  let rec has_row_field te =
     match te.desc with
-    | Tfield (_, _, _, ts) -> has_row ts
+    | Tfield (_, _, _, ts) -> has_row_field ts
     | Tnil                 -> false
     | Tvar _               -> true
     | _                    -> assert false
+  in
+  let rec has_row_var te =
+    match te.desc with
+    | Tvar _                -> true
+    | Tnil                  -> false
+    | Tvariant { row_more } -> has_row_var row_more
+    | _                     -> assert false
   in
   fun ~equality_cache ~subst ?(varsubst=[]) ->
     let core_type_of_type_expr t = core_type_of_type_expr ~equality_cache ~subst ~varsubst t in
@@ -134,10 +141,10 @@ let rec core_type_of_type_expr =
       | Ttuple xs ->
         Typ.tuple (List.map core_type_of_type_expr xs)
       | Tconstr (path, args, _) -> named ~mk:Typ.constr path args
-      | Tvariant { row_fixed }
-        when not row_fixed && H.mem equality_cache type_expr ->
+      | Tvariant { row_more }
+        when has_row_var row_more && H.mem equality_cache type_expr ->
         Typ.var (H.find equality_cache type_expr)
-      | Tvariant { row_fixed; row_fields; row_closed; row_more } ->
+      | Tvariant { row_fields; row_closed; row_more } ->
         let poly = ref None in
         let fields =
           row_fields |> List.map (fun (label, row_field) ->
@@ -165,12 +172,12 @@ let rec core_type_of_type_expr =
           | _                                    ->
             raise_errorf "Unknown row variable description: %s" (Format.asprintf "%a" Printtyp.type_expr row_more)
         in
-        cache_result ~is_polymorphic:(not row_fixed) @@ finish row_more
+        cache_result ~is_polymorphic:(has_row_var row_more) @@ finish row_more
       | Tobject (fds, _)
-        when has_row fds && H.mem equality_cache type_expr ->
+        when has_row_field fds && H.mem equality_cache type_expr ->
         Typ.var (H.find equality_cache type_expr)
       | Tobject (fds, { contents = Some (path, args) }) ->
-        cache_result ~is_polymorphic:(has_row fds) @@ named ~mk:Typ.class_ path @@ List.tl args
+        cache_result ~is_polymorphic:(has_row_field fds) @@ named ~mk:Typ.class_ path @@ List.tl args
       | Tobject (fds, { contents = None }) ->
         let rec fields t =
           match t.desc with
@@ -189,7 +196,7 @@ let rec core_type_of_type_expr =
           | Some None,     fields      -> Typ.object_ fields Open
           | Some (Some v), fields      -> Typ.alias (Typ.object_ fields Open) v
         in
-        cache_result ~is_polymorphic:(has_row fds) r
+        cache_result ~is_polymorphic:(has_row_field fds) r
       | Tpoly (ty, tys) ->
         let tys =
           List.map
