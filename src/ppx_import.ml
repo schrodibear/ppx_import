@@ -289,8 +289,30 @@ let ptype_decl_of_ttype_decl =
                             pld_loc;
                             pld_attributes })
                         lds));
-              pcd_res        = (match cd.cd_res with Some x -> Some (core_type_of_type_expr x)
-                                                   | None -> None);
+              pcd_res        =
+                (match cd.cd_res with
+                 | Some x ->
+                   Some
+                     (match core_type_of_type_expr x with
+                      | { ptyp_desc = Ptyp_constr (lid, cts); _ } as ct ->
+                        let cts =
+                          match params with
+                          | Some params ->
+                            begin try
+                              List.map2
+                                (fun ct (subst, _) ->
+                                   match subst.ptyp_desc with
+                                   | Ptyp_var v -> Typ.alias ct v
+                                   | _ -> ct)
+                                cts params
+                            with
+                            | Invalid_argument _ -> cts
+                            end
+                          | None -> cts
+                        in
+                        { ct with ptyp_desc = Ptyp_constr (lid, cts) }
+                      | ct -> ct)
+                 | None -> None);
               pcd_loc        = cd.cd_loc;
               pcd_attributes = cd.cd_attributes; }))
     and ptype_manifest =
